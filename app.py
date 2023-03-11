@@ -93,13 +93,72 @@ def encrypt_file():
         return render_template('index.html')
             
 
+@app.route('/decrypt', methods =['GET', "POST"])
+def decrypt_file():
+    if request.method == 'POST':
+        if 'file' not in request.files or 'key' not in request.files:
+            return "No file selected"
+        
+        file = request.files['file']
+        key = request.files['key']
+        if file.filename == '' or key.filename == '':
+            return "No file selected"
+        
+        # Save the files to disk
+        filename    = secure_filename(file.filename)
+        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+        keyname     = secure_filename(key.filename)
+        key.save(os.path.join(app.config['UPLOAD_FOLDER'], keyname))      
+        
+        # Decrypt the file
+        input_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        key_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        output_path = os.path.join(app.config['DOWNLOAD_FOLDER'], filename)
+        key = load_key(key_path)
+        fernet = Fernet(key)
+        
+        with open(input_path, 'rb') as encrypted_file:
+            encrypted = encrypted_file.read()
+        decrypted = fernet.decrypt(encrypted)
+        
+        with open(output_path, 'wb') as decrypted_file:
+            decrypted_file.write(decrypted)
+            
+        os.remove(input_path)
+        os.remove(key_path)
 
+        # Send dec file to user
+        return send_file(output_path, as_attachment=True)
+    
+    else:
+        return render_template('decrypt.html')
 
-
-
-
-
-
+@app.route('/clear')
+def clear():
+    # Clear uploads folder
+    for filename in os.listdir(app.config['UPLOAD_FOLDER']):
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        except Exception as e:
+            print('Failed to delete %s. Reason: %s' % (file_path, e))
+    
+    # Clear downloads folder
+    for filename in os.listdir(app.config['DOWNLOAD_FOLDER']):
+        file_path = os.path.join(app.config['DOWNLOAD_FOLDER'], filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        except Exception as e:
+            print('Failed to delete %s. Reason: %s' % (file_path, e))
+    
+    flash('Folders cleared successfully', 'success')
+    return redirect(url_for('index'))
 
 
 def allowed_file(filename):
