@@ -7,11 +7,11 @@ import shutil
 import secrets
 
 
-app = Flask(__name__, static_folder='static')
-app.secret_key = secrets.token_hex(16)
-app.config['UPLOAD_FOLDER'] = os.path.join(app.root_path, 'uploads')
-app.config['DOWNLOAD_FOLDER'] = os.path.join(app.root_path, 'downloads')
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+app                                 = Flask(__name__, static_folder='static')
+app.secret_key                      = secrets.token_hex(16)
+app.config['UPLOAD_FOLDER']         = os.path.join(app.root_path, 'uploads')
+app.config['DOWNLOAD_FOLDER']       = os.path.join(app.root_path, 'downloads')
+app.config['MAX_CONTENT_LENGTH']    = 16 * 1024 * 1024
 
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
@@ -33,36 +33,48 @@ def index():
 
 @app.route('/encrypt', methods=['POST'])
 def encrypt_file():
-    # check if the post request has the file part
+    # Check if file present
     if 'file' not in request.files:
         return "No file uploaded"
+    
     file = request.files['file']
+
     if file.filename == '':
         return "No file selected"
-    # Check if the file type is allowed
+    # Check for allowable file type
     if file and allowed_file(file.filename):
         # Secure the filename
+        filename    = secure_filename(file.filename)
+        # Save the file to the upload folder
+        filepath    = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
         filename = secure_filename(file.filename)
+        
         # Save the file to the upload folder
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
+
         # Generate a new encryption key and save it to a file named 'key.key'
         key = Fernet.generate_key()
         with open('key.key', 'wb') as key_file:
             key_file.write(key)
+        
         # Create a Fernet instance with the generated key
         fernet = Fernet(key)
         # Read the contents of the original file
         with open(filepath, 'rb') as original_file:
             original = original_file.read()
+        
         # Encrypt the file contents
         encrypted = fernet.encrypt(original)
         # Save the encrypted file to a file named after the original file
         with open(filename, 'wb') as encrypted_file:
             encrypted_file.write(encrypted)
+
         # Create a zip file containing the encrypted file and the encryption key
-        filen = filename.split(".")[0]    
-        zip_path = os.path.join(app.config['UPLOAD_FOLDER'], filen + '.zip')
+        filen       = filename.split(".")[0]
+        zip_path = os.path.join(app.config['UPLOAD_FOLDER'], f'{filen}.zip')
+        
         with ZipFile(zip_path, 'w') as zip_file:
             zip_file.write(filename)
             zip_file.write('key.key')
@@ -73,10 +85,8 @@ def encrypt_file():
         os.remove(filepath)
         os.remove('key.key')
 
-        # Send the decrypted file to the user
-        response = send_file(zip_path, as_attachment=True)
-        
-        return response
+        return send_file(zip_path, as_attachment=True)
+    
     else:
         # If the file type is not allowed, redirect to the home page
         return render_template('index.html')
@@ -84,58 +94,67 @@ def encrypt_file():
 
 @app.route('/decrypt', methods=['GET', 'POST'])
 def decrypt_file():
-    if request.method == 'POST':
-        if 'file' not in request.files or 'key' not in request.files:
-            return "No file uploaded"
-
-        file = request.files['file']
-        key = request.files['key']
-        if file.filename == '' or key.filename == '':
-            return "No file selected"
-        
-        # Save the files to disk
-        filename = secure_filename(file.filename)
-        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-        keyname = secure_filename(key.filename)
-        key.save(os.path.join(app.config['UPLOAD_FOLDER'], keyname))
-        
-        # Decrypt the file
-        input_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        key_path = os.path.join(app.config['UPLOAD_FOLDER'], keyname)
-        output_path = os.path.join(app.config['DOWNLOAD_FOLDER'], filename)
-        key = load_key(key_path)
-        fernet = Fernet(key)
-        with open(input_path, 'rb') as encrypted_file:
-            encrypted = encrypted_file.read()
-        decrypted = fernet.decrypt(encrypted)
-        with open(output_path, 'wb') as decrypted_file:
-            decrypted_file.write(decrypted)
-
-        os.remove(input_path)
-        os.remove(key_path)
-        # Send the decrypted file to the user
-        return send_file(output_path, as_attachment=True)
-    else:
+    if request.method != 'POST':
         return render_template('decrypt.html')
+    
+    if 'file' not in request.files or 'key' not in request.files:
+        return "No file uploaded"
+
+    file    = request.files['file']
+    key     = request.files['key']
+
+    if file.filename == '' or key.filename == '':
+        return "No file selected"
+
+    # Save the files to disk
+    filename    = secure_filename(file.filename)
+    file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+
+    keyname     = secure_filename(key.filename)
+    key.save(os.path.join(app.config['UPLOAD_FOLDER'], keyname))
+
+    # Decrypt the file
+    input_path    = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    key_path      = os.path.join(app.config['UPLOAD_FOLDER'], keyname)
+    output_path   = os.path.join(app.config['DOWNLOAD_FOLDER'], filename)
+    key           = load_key(key_path)
+    fernet        = Fernet(key)
+
+    with open(input_path, 'rb') as encrypted_file:
+        encrypted = encrypted_file.read()
+    decrypted = fernet.decrypt(encrypted)
+
+    with open(output_path, 'wb') as decrypted_file:
+        decrypted_file.write(decrypted)
+
+    os.remove(input_path)
+    os.remove(key_path)
+    # Send the decrypted file to the user
+    return send_file(output_path, as_attachment=True)
+    
     
 @app.route('/text-encryption', methods=['GET', 'POST'])
 def text_encryption():
     if request.method == 'POST':
-        text = bytes(request.form.get('en-text'), 'utf-8')
+        text              = bytes(request.form.get('en-text'), 'utf-8')
+        
         # perform encryption on the text here and get the encrypted text and key
-        key = Fernet.generate_key()
-        f=Fernet(key)
-        encrypted_text = f.encrypt(text).decode()
-        key=key.decode()
+        key               = Fernet.generate_key()
+        f                 = Fernet(key)
+        encrypted_text    = f.encrypt(text).decode()
+        key               = key.decode()
+        
         return render_template('index.html', encrypted_text=encrypted_text, key=key, text=text)
+    
     return render_template('index.html')
 
 @app.route('/decrypt_text',  methods=['GET', 'POST'])
 def decrypt_text():
     if request.method == 'POST':
-        text = bytes(request.form.get('en-text'), 'utf-8')
-        key = request.form.get('key')
-        # perform decryption
+        text    = bytes(request.form.get('en-text'), 'utf-8')
+        key     = request.form.get('key')
+        
+        # Try to perform decryption
         try:
             f=Fernet(key)
             decrypted_text = f.decrypt(text).decode()
@@ -161,8 +180,8 @@ def clear():
             elif os.path.isdir(file_path):
                 shutil.rmtree(file_path)
         except Exception as e:
-            print('Failed to delete %s. Reason: %s' % (file_path, e))
-    
+            print(f'Failed to delete {file_path}. Reason: {e}')
+
     # Clear downloads folder
     for filename in os.listdir(app.config['DOWNLOAD_FOLDER']):
         file_path = os.path.join(app.config['DOWNLOAD_FOLDER'], filename)
@@ -172,8 +191,8 @@ def clear():
             elif os.path.isdir(file_path):
                 shutil.rmtree(file_path)
         except Exception as e:
-            print('Failed to delete %s. Reason: %s' % (file_path, e))
-    
+            print(f'Failed to delete {file_path}. Reason: {e}')
+
     flash('Folders cleared successfully', 'success')
     return redirect(url_for('index'))
 
